@@ -23,3 +23,12 @@ class LoginForm(FlaskForm):
 
     username = StringField('Username', validators=[DataRequired()])
     password = PasswordField('Password', validators=[Length(min=6)])
+
+class EditProfileForm(FlaskForm):
+    """Form for editing a profile"""
+    username = StringField('Username', validators=[DataRequired()])
+    email = StringField('E-mail', validators=[DataRequired()])
+    image_url = StringField('Profile Photo URL')
+    header_image_url = StringField('Header Image Photo URL')
+    bio = TextAreaField('Bio')
+    password = PasswordField('Enter current password to verify these changes', validators=[Length(min=6)])

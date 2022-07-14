@@ -4,7 +4,7 @@ from flask import Flask, render_template, request, flash, redirect, session, g
 from flask_debugtoolbar import DebugToolbarExtension
 from sqlalchemy.exc import IntegrityError
 
-from forms import UserAddForm, LoginForm, MessageForm
+from forms import UserAddForm, LoginForm, MessageForm, EditProfileForm
 from models import db, connect_db, User, Message
 
 CURR_USER_KEY = "curr_user"
@@ -113,9 +113,9 @@ def login():
 def logout():
     """Handle logout of user."""
 
-    # IMPLEMENT THIS
-
-
+    flash("Successfuly logged out", "success")
+    do_logout()
+    return redirect('/login')
 ##############################################################################
 # General user routes:
 
@@ -211,7 +211,27 @@ def stop_following(follow_id):
 def profile():
     """Update profile for current user."""
 
-    # IMPLEMENT THIS
+    user = g.user
+
+    if not user:
+        flash("Access unauthorized.", "danger")
+        return redirect("/")
+    
+    form = EditProfileForm(obj=user)
+
+    if form.validate_on_submit():
+        if User.authenticate(user.username, form.password.data):
+            user.username = form.username.data
+            user.email = form.email.data
+            user.image_url = form.image_url.data
+            user.header_image_url = form.header_image_url.data
+            user.bio = form.bio.data
+            db.session.commit()
+            return redirect(f'/users/{user.id}')
+        
+        flash("Invalid Password", "danger")
+
+    return render_template("users/edit.html", form=form)
 
 
 @app.route('/users/delete', methods=["POST"])
@@ -278,6 +298,48 @@ def messages_destroy(message_id):
 
     return redirect(f"/users/{g.user.id}")
 
+### Likes
+@app.route('/users/add_like/<int:message_id>', methods=['POST'])
+def like_message(message_id):
+    """Add a like to a message"""
+    
+    if not g.user:
+        flash("Unauthorized. Please login or signup.", "danger")
+        redirect('/login')
+
+    
+    message_liked = Message.query.get_or_404(message_id)
+
+    if message_liked.user_id == g.user.id:
+        flash('Sorry, you can only like other users messages. It is a given that you like your own', "info")
+        return redirect('/') 
+
+    users_liked_messages = g.user.likes
+
+    ## if message message that was clicked is already in the list of liked messages,
+    ## then the list of liked messages is now the previous list MINUS the message clicked
+    ## otherwise it's just a liked message. Either way, the change is commited to the database.
+
+    if message_liked in users_liked_messages:
+        g.user.likes = [like for like in users_liked_messages if like != message_liked]
+    else:
+        g.user.likes.append(message_liked)
+
+    db.session.commit()
+
+    return redirect('/')
+    
+@app.route('/users/<int:user_id>/likes')
+def show_users_likes(user_id):
+    """Show All User's Likes"""
+    
+    if not g.user:
+        flash("Unauthorized. Please login or signup.", "danger")
+        redirect('/login')
+
+    user = User.query.get_or_404(user_id)
+
+    return render_template('users/likes.html', user=user)
 
 ##############################################################################
 # Homepage and error pages
@@ -290,10 +352,13 @@ def homepage():
     - anon users: no messages
     - logged in: 100 most recent messages of followed_users
     """
+    if g.user:
+        following_ids = [f.id for f in g.user.following] + [g.user.id]
 
     if g.user:
         messages = (Message
                     .query
+                    .filter(Message.user_id.in_(following_ids))
                     .order_by(Message.timestamp.desc())
                     .limit(100)
                     .all())
