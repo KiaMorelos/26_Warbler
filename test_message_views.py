@@ -15,7 +15,7 @@ from models import db, connect_db, Message, User
 # before we import our app, since that will have already
 # connected to the database
 
-os.environ['DATABASE_URL'] = "postgresql:///warbler-test"
+os.environ['DATABASE_URL'] = "postgresql:///warbler_test"
 
 
 # Now we can import app
@@ -39,8 +39,10 @@ class MessageViewTestCase(TestCase):
     def setUp(self):
         """Create test client, add sample data."""
 
-        User.query.delete()
-        Message.query.delete()
+        db.drop_all()
+        db.create_all()
+        # User.query.delete()
+        # Message.query.delete()
 
         self.client = app.test_client()
 
@@ -48,6 +50,7 @@ class MessageViewTestCase(TestCase):
                                     email="test@test.com",
                                     password="testuser",
                                     image_url=None)
+        self.testuser.id = 901
 
         db.session.commit()
 
@@ -71,3 +74,60 @@ class MessageViewTestCase(TestCase):
 
             msg = Message.query.one()
             self.assertEqual(msg.text, "Hello")
+
+    def test_unauthorized_add_msg(self):
+        """Don't allow adding messages without logging in"""
+
+        with self.client as c:
+            resp = c.post("/messages/new", data={"text": "Hello"}, follow_redirects=True)
+            self.assertEqual(resp.status_code, 200)
+            content = resp.get_data(as_text=True)
+            self.assertIn("Access unauthorized", content)
+
+    def test_unauthorized_del_msg(self):
+        """No deleting messages when not logged in"""
+
+        test_msg = Message(
+            text = "Test test test test hi hi",
+            user_id = self.testuser.id,
+            )
+        
+        db.session.add(test_msg)
+        db.session.commit()
+
+        with self.client as c:
+
+                resp = c.post(f"/messages/{test_msg.id}/delete", follow_redirects=True)
+                content = resp.get_data(as_text=True)
+                self.assertEqual(resp.status_code, 200)
+                self.assertIn("Access unauthorized", content)
+
+
+    def test_deleting_other_user_msg(self):
+        """"No deleting other users messages"""
+
+        other_user = User.signup(username="hackyuser", email="hackyuser@test.com", password="password", image_url=None)
+        other_user.id = 555
+
+        test_msg = Message(
+            id=222,
+            text="Test test test test hi hi",
+            user_id=self.testuser.id,
+            )
+        
+        db.session.add(test_msg)
+        db.session.add(other_user)
+
+        db.session.commit()
+
+        with self.client as c:
+            with c.session_transaction() as sess:
+                sess[CURR_USER_KEY] = 555
+
+            resp = c.post("/messages/222/delete", follow_redirects=True)
+            content = resp.get_data(as_text=True)
+            self.assertEqual(resp.status_code, 200)
+            self.assertIn("Access unauthorized", content)
+
+                
+
